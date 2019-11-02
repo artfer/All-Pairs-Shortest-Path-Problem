@@ -1,6 +1,7 @@
 #include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 #define MAX 65536
 #define MIN(x, y) ((x) < (y)) ? (x) : (y)
@@ -25,6 +26,8 @@ typedef struct {
 
 
 LOCAL_MATRIX_TYPE* Local_matrix_allocate(int n_bar);
+void Free_local_matrix(LOCAL_MATRIX_TYPE** local_A);
+void Build_matrix_type(LOCAL_MATRIX_TYPE* local_A);
 void Set_to_zero(LOCAL_MATRIX_TYPE* local_A);
 void Setup_grid(GRID_INFO_TYPE* grid);
 void Fox(int n, GRID_INFO_TYPE* grid,
@@ -44,6 +47,40 @@ LOCAL_MATRIX_TYPE* Local_matrix_allocate(int n_bar){
   tmp = (LOCAL_MATRIX_TYPE*) malloc(sizeof(LOCAL_MATRIX_TYPE));
   return tmp;
 }
+
+
+void Free_local_matrix(LOCAL_MATRIX_TYPE** local_A) {
+    free(*local_A);
+}
+
+
+void Build_matrix_type(LOCAL_MATRIX_TYPE* local_A) {
+    MPI_Datatype  temp_mpi_t;
+    int           block_lengths[2];
+    MPI_Aint      displacements[2];
+    MPI_Datatype  typelist[2];
+    MPI_Aint      start_address;
+    MPI_Aint      address;
+
+    MPI_Type_contiguous(Order(local_A)*Order(local_A), 
+        MPI_FLOAT, &temp_mpi_t);
+
+    block_lengths[0] = block_lengths[1] = 1;
+   
+    typelist[0] = MPI_INT;
+    typelist[1] = temp_mpi_t;
+
+    MPI_Get_address(local_A, &start_address);
+    MPI_Get_address(&(local_A->n_bar), &address);
+    displacements[0] = address - start_address;
+    
+    MPI_Get_address(local_A->entries, &address);
+    displacements[1] = address - start_address;
+
+    MPI_Type_create_struct(2, block_lengths, displacements,
+        typelist, &DERIVED_LOCAL_MATRIX);
+    MPI_Type_commit(&DERIVED_LOCAL_MATRIX); 
+} 
 
 
 void Set_to_zero(LOCAL_MATRIX_TYPE*  local_A) {
@@ -90,8 +127,7 @@ void Read_matrix(LOCAL_MATRIX_TYPE*  local_A, GRID_INFO_TYPE* grid, int n) {
                 MPI_Cart_rank(grid->comm, coords, &dest);
                 if (dest == 0) {
                     for (mat_col = 0; mat_col < Order(local_A); mat_col++)
-                        scanf("%f", 
-                          (local_A->entries)+mat_row*Order(local_A)+mat_col);
+                        scanf("%f", (local_A->entries)+mat_row*Order(local_A)+mat_col);
                 } else {
                     for(mat_col = 0; mat_col < Order(local_A); mat_col++)
                         scanf("%f", temp + mat_col);
