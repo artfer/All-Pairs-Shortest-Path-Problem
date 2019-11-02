@@ -2,6 +2,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define MAX 65536
+#define MIN(x, y) ((x) < (y)) ? (x) : (y)
+
 typedef struct {
   int p;              // Total number of processes
   MPI_Comm comm;      // Comunicator for entire grid
@@ -14,14 +17,15 @@ typedef struct {
 } GRID_INFO_TYPE;
 
 typedef struct {
-  
+  int n_bar;
+  #define Order(A) ((A)->n_bar)
+  float entries[MAX];
+  #define Entry(A,i,j) (*(((A)->entries) + ((A)->n_bar)*(i) + (j))) 
 } LOCAL_MATRIX_TYPE;
 
-typedef struct {
-  
-} DERIVED_LOCAL_MATRIX;
 
-
+LOCAL_MATRIX_TYPE* Local_matrix_allocate(int n_bar);
+void Set_to_zero(LOCAL_MATRIX_TYPE* local_A);
 void Setup_grid(GRID_INFO_TYPE* grid);
 void Fox(int n, GRID_INFO_TYPE* grid,
     LOCAL_MATRIX_TYPE* local_A,
@@ -30,8 +34,119 @@ void Fox(int n, GRID_INFO_TYPE* grid,
 void Local_matrix_multiply(LOCAL_MATRIX_TYPE* local_A,
     LOCAL_MATRIX_TYPE* local_B,
     LOCAL_MATRIX_TYPE* local_C);
-LOCAL_MATRIX_TYPE* Local_matrix_allocate(int n_bar);
-void Set_to_zero(LOCAL_MATRIX_TYPE* local_A);
+
+MPI_Datatype DERIVED_LOCAL_MATRIX;
+
+
+LOCAL_MATRIX_TYPE* Local_matrix_allocate(int n_bar){
+  LOCAL_MATRIX_TYPE * tmp;
+  
+  tmp = (LOCAL_MATRIX_TYPE*) malloc(sizeof(LOCAL_MATRIX_TYPE));
+  return tmp;
+}
+
+
+void Set_to_zero(LOCAL_MATRIX_TYPE*  local_A) {
+    int i, j;
+
+    for (i = 0; i < Order(local_A); i++)
+        for (j = 0; j < Order(local_A); j++)
+            Entry(local_A,i,j) = 0.0;
+}
+
+
+void Local_matrix_multiply(
+         LOCAL_MATRIX_TYPE*  local_A,
+         LOCAL_MATRIX_TYPE*  local_B, 
+         LOCAL_MATRIX_TYPE*  local_C) {
+    int i, j, k;
+
+    for (i = 0; i < Order(local_A); i++)
+        for (j = 0; j < Order(local_A); j++)
+            for (k = 0; k < Order(local_B); k++){
+                int tmp = Entry(local_A,i,k)+Entry(local_B,k,j);
+                Entry(local_C,i,j) = MIN(Entry(local_C,i,j), tmp);
+            }
+
+}
+
+
+void Read_matrix(LOCAL_MATRIX_TYPE*  local_A, GRID_INFO_TYPE* grid, int n) {
+
+    int        mat_row, mat_col;
+    int        grid_row, grid_col;
+    int        dest;
+    int        coords[2];
+    float*     temp;
+    MPI_Status status;
+    
+    if (grid->my_rank == 0) {
+        temp = (float*) malloc(Order(local_A)*sizeof(float));
+        for (mat_row = 0;  mat_row < n; mat_row++) {
+            grid_row = mat_row/Order(local_A);
+            coords[0] = grid_row;
+            for (grid_col = 0; grid_col < grid->q; grid_col++) {
+                coords[1] = grid_col;
+                MPI_Cart_rank(grid->comm, coords, &dest);
+                if (dest == 0) {
+                    for (mat_col = 0; mat_col < Order(local_A); mat_col++)
+                        scanf("%f", 
+                          (local_A->entries)+mat_row*Order(local_A)+mat_col);
+                } else {
+                    for(mat_col = 0; mat_col < Order(local_A); mat_col++)
+                        scanf("%f", temp + mat_col);
+                    MPI_Send(temp, Order(local_A), MPI_FLOAT, dest, 0,
+                        grid->comm);
+                }
+            }
+        }
+        free(temp);
+    } else {
+        for (mat_row = 0; mat_row < Order(local_A); mat_row++) 
+            MPI_Recv(&Entry(local_A, mat_row, 0), Order(local_A), 
+                MPI_FLOAT, 0, 0, grid->comm, &status);
+    }          
+} 
+
+
+void Print_matrix(
+         LOCAL_MATRIX_TYPE* local_A, GRID_INFO_TYPE* grid, int n) {
+    int mat_row, mat_col;
+    int grid_row, grid_col;
+    int source;
+    int coords[2];
+    float* temp;
+    MPI_Status status;
+
+    if (grid->my_rank == 0) {
+        temp = (float*) malloc(Order(local_A)*sizeof(float));
+        for (mat_row = 0;  mat_row < n; mat_row++) {
+            grid_row = mat_row/Order(local_A);
+            coords[0] = grid_row;
+            for (grid_col = 0; grid_col < grid->q; grid_col++) {
+                coords[1] = grid_col;
+                MPI_Cart_rank(grid->comm, coords, &source);
+                if (source == 0) {
+                    for(mat_col = 0; mat_col < Order(local_A); mat_col++)
+                        printf("%4.1f ", Entry(local_A, mat_row, mat_col));
+                } else {
+                    MPI_Recv(temp, Order(local_A), MPI_FLOAT, source, 0,
+                        grid->comm, &status);
+                    for(mat_col = 0; mat_col < Order(local_A); mat_col++)
+                        printf("%4.1f ", temp[mat_col]);
+                }
+            }
+            printf("\n");
+        }
+        free(temp);
+    } else {
+        for (mat_row = 0; mat_row < Order(local_A); mat_row++) 
+            MPI_Send(&Entry(local_A, mat_row, 0), Order(local_A), 
+                MPI_FLOAT, 0, 0, grid->comm);
+    }
+                     
+}
+
 
 void Setup_grid(GRID_INFO_TYPE* grid){
   int old_rank;
@@ -112,27 +227,38 @@ void Fox(int n, GRID_INFO_TYPE* grid,
 
 
 void main(int argc, char **argv) {
-  int numprocs, rank, tag, N;
+  int p,rank,n,n_bar;
+  GRID_INFO_TYPE grid;
+  LOCAL_MATRIX_TYPE* local_A;
+  LOCAL_MATRIX_TYPE* local_B;
+  LOCAL_MATRIX_TYPE* local_C;
   double start, end;
 
   MPI_Init(&argc, &argv);
-  MPI_Comm_size(MPI_COMM_WORLD, &numprocs);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-  tag = rank;
+  Setup_grid(&grid);
+  if (rank == 0)
+    scanf("%d", &n);
 
-  if(rank==0){
-    scanf("%d",&N);
-    int m[N][N];
+  MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
+  n_bar = n/grid.q;
 
-    for(int i=0; i<N; i++){
-      for(int j=0; j<N; j++){
-        scanf("%d",&m[i][j]);
-      }
-    }
+  local_A = Local_matrix_allocate(n_bar);
+  Order(local_A) = n_bar;
+  Read_matrix(local_A, &grid, n);
 
-  }
-  MPI_Barrier(MPI_COMM_WORLD);
+  Build_matrix_type(local_A);
+  //tmp = Local_matrix_allocate(n_bar);
+
+  local_C = Local_matrix_allocate(n_bar);
+  Order(local_C) = n_bar;
+  Fox(n, &grid, local_A, local_A, local_C);
+
+  Print_matrix(local_C, &grid, n);
+
+  Free_local_matrix(&local_A);
+  Free_local_matrix(&local_C);
 
   MPI_Finalize();
   return;
