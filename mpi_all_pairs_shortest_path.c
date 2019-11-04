@@ -126,8 +126,9 @@ void Read_matrix(LOCAL_MATRIX_TYPE*  local_A, GRID_INFO_TYPE* grid, int n) {
                 coords[1] = grid_col;
                 MPI_Cart_rank(grid->comm, coords, &dest);
                 if (dest == 0) {
-                    for (mat_col = 0; mat_col < Order(local_A); mat_col++)
+                    for (mat_col = 0; mat_col < Order(local_A); mat_col++){
                         scanf("%f", (local_A->entries)+mat_row*Order(local_A)+mat_col);
+                    }
                 } else {
                     for(mat_col = 0; mat_col < Order(local_A); mat_col++)
                         scanf("%f", temp + mat_col);
