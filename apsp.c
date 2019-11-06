@@ -18,17 +18,112 @@ typedef struct {
   int my_rank;        // My rank in the grid communicator
 } GRID_INFO_TYPE;
 
-void Setup_grid(GRID_INFO_TYPE* grid);
+
 int  Transform(int i, int j, int val);
-int  Transform_back(int val);
+int  Transform_inverse(int val);
 int  Get_value(int* local_A, int i, int j, int n_bar);
 void Put_value(int* local_A, int i, int j, int n_bar, int val);
-void Update_value(int* local_A, int i, int j, int n_bar, int val); 
+void Update_value(int* local_A, int i, int j, int n_bar, int val);
+void Set_to_max(int* local_A, int n_bar);
+void Local_matrix_multiply(int* local_A, int* local_B, int* local_C, int n_bar);
 void Read_matrix(int* matrix, GRID_INFO_TYPE* grid, int n, int q);
 void Print_matrix(int* matrix, GRID_INFO_TYPE* grid, int n, int q);
+void Setup_grid(GRID_INFO_TYPE* grid); 
 void Fox(int n, GRID_INFO_TYPE* grid, int* local_A, int* local_B, int* local_C);
-void Local_matrix_multiply(int* local_A, int* local_B, int* local_C, int n_bar);
-void Set_to_max(int* local_A, int n_bar);
+void Min_plus_matrix_mul(int* matrix, int n, GRID_INFO_TYPE grid);
+
+
+// in order to avoid a final matrix of 0's,
+// every 0 (not in the main diagonal) turns to MAX 
+int Transform(int i, int j, int val){
+    if(i == j)
+        return 0;
+    if(val == 0)
+        return MAX;
+    return val;
+}
+
+
+int Transform_inverse(int val){
+    return val == MAX ? 0 : val;
+}
+
+
+// same as returning local_A[i][j]
+int Get_value(int* local_A, int i, int j, int n_bar){
+    int offset = (i * n_bar) + j;
+    return local_A[offset];
+}
+
+
+// inserts value in local_A[i][j]
+void Put_value(int* local_A, int i, int j, int n_bar, int val){
+    int offset = (i * n_bar) + j;
+    local_A[offset] = val;
+}
+
+
+// updates local_A[i][j] to the min of its value and val
+void Update_value(int* local_A, int i, int j, int n_bar, int val){
+    int offset = (i * n_bar) + j;
+    local_A[offset] = MIN(local_A[offset],val);
+}
+
+
+// initializes a matrix with MAX values
+void Set_to_max(int* local_A, int n_bar){
+    for(int i = 0; i < n_bar; i++)
+        for(int j = 0; j < n_bar; j++)
+            Put_value(local_A,i,j,n_bar,MAX);
+}
+
+
+// "multiply" local_A and local_B 
+void Local_matrix_multiply(int* local_A, int* local_B, int* local_C, int n_bar){
+    int tmp; 
+
+    for(int i = 0; i < n_bar; i++)
+        for(int j = 0; j < n_bar; j++)
+            for(int k = 0; k < n_bar; k++){
+                tmp = Get_value(local_A, i, k, n_bar) + 
+                    Get_value(local_B, k, j, n_bar);
+                Update_value(local_C, i, j, n_bar, tmp);     
+            }
+}
+
+
+void Read_matrix(int* matrix, GRID_INFO_TYPE* grid, int n, int q){
+    int n_bar = n / q;
+    int tmp;
+
+    if(grid->my_rank == 0){
+        for(int i = 0; i < n; i++){
+            for(int j = 0; j < n; j++){
+                scanf("%d",&tmp);
+
+                tmp = Transform(i,j,tmp);                                 
+                Put_value(matrix,i,j,n_bar,tmp);
+            }
+        }
+    }
+}
+
+
+void Print_matrix(int* matrix, GRID_INFO_TYPE* grid, int n, int q){
+    int n_bar = n / q;
+    int tmp;
+
+    if(grid->my_rank == 0) {
+        for(int i = 0; i < n; i++){
+            for(int j = 0; j < n; j++){
+                tmp = Get_value(matrix,i,j,n_bar);
+                tmp = Transform_inverse(tmp);
+                printf("%d ",tmp);
+            }
+            printf("\n");
+        }
+    }
+}
 
 
 void Setup_grid(GRID_INFO_TYPE* grid){
@@ -71,185 +166,100 @@ void Setup_grid(GRID_INFO_TYPE* grid){
 }
 
 
-int Transform(int i, int j, int val){
-    if(i == j)
-        return 0;
-    if(val == 0)
-        return MAX;
-    return val;
-}
-
-int Transform_back(int val){
-    return val == MAX ? 0 : val;
-}
-
-int Get_value(int* local_A, int i, int j, int n_bar){
-    int offset = (i * n_bar) + j;
-    return local_A[offset];
-}
-
-void Put_value(int* local_A, int i, int j, int n_bar, int val){
-    int offset = (i * n_bar) + j;
-    local_A[offset] = val;
-}
-
-void Update_value(int* local_A, int i, int j, int n_bar, int val){
-    int offset = (i * n_bar) + j;
-    local_A[offset] = MIN(local_A[offset],val);
-}
-
-
-void Read_matrix(int* matrix, GRID_INFO_TYPE* grid, int n, int q){
-    
-    int n_bar = n / q;
-    int src=0,dest;
-    int tmp;
-    int grid_coords[2];
-    MPI_Status status;
-
-    // reads the matrix and sends to the other processes
-    if(grid->my_rank == 0) {
-        
-        for(int i = 0; i < n; i++){
-
-            for(int j = 0; j < n; j++){
-                    
-                    scanf("%d",&tmp);
-
-                    // to avoid zeros in the final result 
-                    tmp = Transform(i,j,tmp); 
-                                
-                    Put_value(matrix,i,j,n_bar,tmp);
-                }
-            }
-        }
-    MPI_Barrier(MPI_COMM_WORLD);
-}
-
-void Print_matrix(int* matrix, GRID_INFO_TYPE* grid, int n, int q){
-    int n_bar = n / q;
-    int src,dest=0;
-    int tmp;
-    int grid_coords[2];
-    MPI_Status status;
-
-    // reads the matrix and sends to the other processes
-    if(grid->my_rank == 0) {
-        
-        for(int i = 0; i < n; i++){
-            for(int j = 0; j < n; j++){
-                tmp = Get_value(matrix,i,j,n_bar);
-                tmp = Transform_back(tmp);
-                printf("%d ",tmp);
-            }
-            printf("\n");
-        }
-    }
-}
-
-
-
-void Fox(int n, GRID_INFO_TYPE* grid,
-    int* local_A,
-    int* local_B,
-    int* local_C){
+void Fox(int n, GRID_INFO_TYPE* grid, int* local_A, int* local_B, int* local_C){
   
-  int step; 
-  int bcast_root;
-  int n_bar; // order of block submatrix = n/q
-  int source;
-  int dest;
-  int tag = 43;
-  MPI_Status status;
+    int step; 
+    int bcast_root;
+    int n_bar; // order of block submatrix = n/q
+    int source,dest;
+    int tag = 43;
+    MPI_Status status;
 
-  n_bar = n/grid->q;
-  Set_to_max(local_C, n_bar);
+    n_bar = n/grid->q;
+    Set_to_max(local_C, n_bar);
 
-  // Calculate addresses for circular shift of B
-  source = (grid->my_row + 1) % grid->q;
-  dest = (grid->my_row + grid->q - 1) % grid->q;
+    // Calculate addresses for circular shift of B
+    source = (grid->my_row + 1) % grid->q;
+    dest = (grid->my_row + grid->q - 1) % grid->q;
 
-  // Set aside storage for the broadcast block of A 
-  int* temp_A = (int*) malloc(n_bar * n_bar * sizeof(int));
+    // Set aside storage for the broadcast block of A 
+    int* temp_A = (int*) malloc(n_bar * n_bar * sizeof(int));
 
-  for(step = 0; step < grid->q; step++){
-    bcast_root = (grid->my_row + step) % grid->q;
-    if(bcast_root == grid->my_col) {
-      MPI_Bcast(local_A, n_bar * n_bar, MPI_INT,bcast_root, grid->row_comm);
-      Local_matrix_multiply(local_A,local_B,local_C, n_bar);
-    } else {
-      MPI_Bcast(temp_A, n_bar * n_bar, MPI_INT, bcast_root, grid->row_comm);
-      Local_matrix_multiply(temp_A,local_B,local_C, n_bar);
-    }
-    MPI_Send(local_B, n_bar * n_bar, MPI_INT, dest, tag, grid->col_comm);
-    MPI_Recv(local_B, n_bar * n_bar, MPI_INT, source, tag, grid->col_comm, &status);
-  } 
-}
+    for(step = 0; step < grid->q; step++){
 
-void Set_to_max(int* local_A, int n_bar){
-    for(int i = 0; i < n_bar; i++){
-        for(int j = 0; j < n_bar; j++){
-        Put_value(local_A,i,j,n_bar,MAX);
+        bcast_root = (grid->my_row + step) % grid->q;
+        if(bcast_root == grid->my_col) {
+            MPI_Bcast(local_A, n_bar * n_bar, MPI_INT,bcast_root, grid->row_comm);
+            Local_matrix_multiply(local_A,local_B,local_C, n_bar);
+        } else {
+            MPI_Bcast(temp_A, n_bar * n_bar, MPI_INT, bcast_root, grid->row_comm);
+            Local_matrix_multiply(temp_A,local_B,local_C, n_bar);
         }
-    }
-
+        MPI_Send(local_B, n_bar * n_bar, MPI_INT, dest, tag, grid->col_comm);
+        MPI_Recv(local_B, n_bar * n_bar, MPI_INT, source, tag, grid->col_comm, &status);
+    } 
+    free(temp_A);
 }
 
-void Local_matrix_multiply(int* local_A, int* local_B, int* local_C, int n_bar){
+void Min_plus_matrix_mul(int* matrix, int n, GRID_INFO_TYPE grid){
+    int n_bar = n / grid.q;
     
-    int tmp; 
-    for(int i = 0; i < n_bar; i++){
-        for(int j = 0; j < n_bar; j++){
-            for(int k = 0; k < n_bar; k++){
-                tmp = Get_value(local_A,i,k,n_bar) + 
-                      Get_value(local_B,k,j,n_bar);
-                //printf("%d ",tmp);
-                Update_value(local_C, i, j, n_bar, tmp);     
-            }
-            //printf("%d ",Get_value(local_C, i, j, n_bar));
-        
-        }
-        //printf("\n");
-    }
+    // Allocate space for local matrices
+    int* local_A = (int *)malloc(n_bar * n_bar * sizeof(int));
+    int* local_C = (int *)malloc(n_bar * n_bar * sizeof(int));
+
+    for(int f = 2; f < n; f+=f){
+
+        // send submatrices to each process  
+        MPI_Scatter(matrix, n_bar*n_bar, MPI_INT,
+                    local_A, n_bar*n_bar, MPI_INT, 0, grid.comm);
+
+        // calculate new matrix
+        Fox(n, &grid, local_A, local_A, local_C);
+
+        // get the final matrix
+        MPI_Gather(local_C, n_bar * n_bar, MPI_INT, 
+                    matrix, n_bar * n_bar, MPI_INT, 0, grid.comm);   
+    } 
+    free(local_A);
+    free(local_C);
 }
 
 
 void main(int argc, char **argv) {
-  int p,rank,n,n_bar;
-  GRID_INFO_TYPE grid;
-  double start, end;
+    
+    int p, rank, n, n_bar;
+    GRID_INFO_TYPE grid;
+    double start, end;
+    int* matrix;
 
-  MPI_Init(&argc, &argv);
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-  Setup_grid(&grid);
-  if (rank == 0)
-    scanf("%d", &n);
-  MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
-  
-  n_bar = n / grid.q;
-  
-  int* matrix; 
-  if (rank==0) matrix = (int *)malloc(n * n * sizeof(int));
+    Setup_grid(&grid);
 
-  int* local_A = (int *)malloc(n_bar * n_bar * sizeof(int));
-  int* local_C = (int *)malloc(n_bar * n_bar * sizeof(int));
+    if(rank == 0){
+        scanf("%d", &n);
+        matrix = (int *)malloc(n * n * sizeof(int));
+    }
+    MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-  Read_matrix(matrix,local_A, &grid, n, grid.q);
-  int f=2;
-  start = MPI_Wtime();
-  do{
-    MPI_Scatter(matrix,n_bar*n_bar,MPI_INT,local_A,n_bar*n_bar,MPI_INT,0,grid.comm);
-    Fox(n, &grid, local_A, local_A, local_C);
-    MPI_Gather(local_C, n_bar * n_bar, MPI_INT, matrix, n_bar * n_bar, MPI_INT, 0, grid.comm);
-    f+=f;
-  } while(f<n);
+    Read_matrix(matrix, &grid, n, grid.q);
 
-  end = MPI_Wtime();
-  double total = end - start;
-  printf("Time %.7f\n",total);
-  Print_matrix(matrix,local_C, &grid, n, grid.q);
+    MPI_Barrier(MPI_COMM_WORLD);
+    start = MPI_Wtime();
 
-  MPI_Finalize();
-  return;
+    Min_plus_matrix_mul(matrix, n, grid);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    end = MPI_Wtime();
+
+    double total = end - start;
+    printf("Time %.7f\n",total);
+
+    // print the final matrix 
+    Print_matrix(matrix, &grid, n, grid.q);
+
+    MPI_Finalize();
+    return;
 }
