@@ -30,6 +30,8 @@ void Read_matrix(int* matrix, GRID_INFO_TYPE* grid, int n, int q);
 void Print_matrix(int* matrix, GRID_INFO_TYPE* grid, int n, int q);
 void Setup_grid(GRID_INFO_TYPE* grid, int n); 
 void Fox(int n, GRID_INFO_TYPE* grid, int* local_A, int* local_B, int* local_C);
+void Scatter_matrix(int* matrix, int* local_A, GRID_INFO_TYPE grid, int n);
+void Scatter_matrix(int* matrix, int* local_A, GRID_INFO_TYPE grid, int n);
 void Min_plus_matrix_mul(int* matrix, int n, GRID_INFO_TYPE grid);
 
 
@@ -138,18 +140,9 @@ void Setup_grid(GRID_INFO_TYPE* grid, int n){
     MPI_Comm_rank(MPI_COMM_WORLD, &old_rank);
 
     // Assuming it's a perfect square...
-    int i;
-    for(i = grid->p; sqrt(i) - (int) sqrt(i) > 0; i--); 
-    //grid->q = (int) sqrt((double) grid->p);
-    //dimensions[0] = dimensions[1] = grid->p;
-    if(grid->p > 1 && i == 1){
-        printf("ERROR: Invalid configuration!\n");
-        exit(0);
-    }
+    grid->q = (int) sqrt((double) grid->p);
+    dimensions[0] = dimensions[1] = grid->q;
     
-    grid->q = (int) sqrt(i);
-    dimensions[0] = dimensions[1] = i;
-
     periods[0] = periods[1] = 1;
 
     // create a cartesian communicator
@@ -211,6 +204,77 @@ void Fox(int n, GRID_INFO_TYPE* grid, int* local_A, int* local_B, int* local_C){
 }
 
 
+void Scatter_matrix(int* matrix, int* local_A, GRID_INFO_TYPE grid, int n){
+    int n_bar = n / grid.q;
+    int dest_coords[2];
+    int tmp;
+    int dest;
+    MPI_Status status;
+
+    if(grid.my_rank == 0){
+
+        for(int i = 0; i < n; i++){
+            dest_coords[0] = i / n_bar;
+            for(int j = 0; j < grid.q; j++){
+                dest_coords[1] = j;
+                printf("%d   %d\n", dest_coords[0], dest_coords[1]);
+                MPI_Cart_rank(grid.comm, dest_coords, &dest);
+                for(int k = 0; k < grid.q; k++){
+                    tmp = Get_value(matrix, i, j*n_bar+k, n_bar);
+                    //printf("rank %d  \n",dest);
+                    if(dest == 0)
+                        Put_value(local_A, i%n_bar, j*n_bar+k, n_bar, tmp);
+                    else 
+                        MPI_Send(&tmp, 1, MPI_INT, dest, 0, grid.comm);
+                }
+            }
+        }
+
+    } else{
+        for(int i = 0; i < n_bar; i++){
+            for(int j=0; j < n_bar; j++){
+                MPI_Recv(&tmp, 1, MPI_INT, 0, 0, grid.comm, &status);
+                Put_value(local_A, i, j, n_bar, tmp);
+            }
+        }
+    }
+}
+
+
+void Gather_matrix(int* matrix, int* local_C, GRID_INFO_TYPE grid, int n){
+    int n_bar = n / grid.q;
+    int src_coords[2];
+    int tmp;
+    int src;
+    MPI_Status status;
+
+
+    if(grid.my_rank == 0){
+
+        for(int i = 0; i < n; i++){
+            src_coords[0] = i / n_bar;
+            for(int j = 0; j < grid.q; j++){
+                src_coords[1] = j;
+                MPI_Cart_rank(grid.comm, src_coords, &src);
+                for(int k = 0; k < n_bar; k++){
+                    if(src == 0)
+                        tmp = Get_value(local_C, i%n_bar, j*n_bar+k, n_bar);
+                    else
+                        MPI_Recv(&tmp, 1, MPI_INT, src, 0, grid.comm, &status);
+                    Put_value(matrix, i, j*n_bar+k, n, tmp);
+                }
+            }
+        }
+    } else {
+        for(int i = 0; i < n_bar; i++){
+            for(int j = 0; j < n_bar; j++){
+                tmp = Get_value(local_C, i, j, n_bar);
+                MPI_Send(&tmp, 1, MPI_INT, 0, 0, grid.comm);
+            }
+        }
+    }
+}
+
 void Min_plus_matrix_mul(int* matrix, int n, GRID_INFO_TYPE grid){
     int n_bar = n / grid.q;
     
@@ -221,15 +285,17 @@ void Min_plus_matrix_mul(int* matrix, int n, GRID_INFO_TYPE grid){
     for(int f = 2; f < n; f+=f){
 
         // send submatrices to each process  
-        MPI_Scatter(matrix, n_bar*n_bar, MPI_INT,
-                    local_A, n_bar*n_bar, MPI_INT, 0, grid.comm);
+        //MPI_Scatter(matrix, n_bar*n_bar, MPI_INT,
+        //            local_A, n_bar*n_bar, MPI_INT, 0, grid.comm);
+        Scatter_matrix(matrix, local_A, grid, n);
 
         // calculate new matrix
         Fox(n, &grid, local_A, local_A, local_C);
 
         // get the final matrix
-        MPI_Gather(local_C, n_bar * n_bar, MPI_INT, 
-                    matrix, n_bar * n_bar, MPI_INT, 0, grid.comm);   
+        //MPI_Gather(local_C, n_bar * n_bar, MPI_INT, 
+        //            matrix, n_bar * n_bar, MPI_INT, 0, grid.comm);   
+        Gather_matrix(matrix, local_C, grid, n);
     } 
     free(local_A);
     free(local_C);
@@ -266,7 +332,8 @@ void main(int argc, char **argv) {
     end = MPI_Wtime();
 
     double total = end - start;
-    printf("Time %.7f\n",total);
+    if(grid.my_rank == 0)
+        printf("Time %.7f\n",total);
 
     // print the final matrix 
     Print_matrix(matrix, &grid, n, grid.q);
