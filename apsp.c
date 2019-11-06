@@ -28,7 +28,7 @@ void Set_to_max(int* local_A, int n_bar);
 void Local_matrix_multiply(int* local_A, int* local_B, int* local_C, int n_bar);
 void Read_matrix(int* matrix, GRID_INFO_TYPE* grid, int n, int q);
 void Print_matrix(int* matrix, GRID_INFO_TYPE* grid, int n, int q);
-void Setup_grid(GRID_INFO_TYPE* grid); 
+void Setup_grid(GRID_INFO_TYPE* grid, int n); 
 void Fox(int n, GRID_INFO_TYPE* grid, int* local_A, int* local_B, int* local_C);
 void Min_plus_matrix_mul(int* matrix, int n, GRID_INFO_TYPE grid);
 
@@ -126,43 +126,52 @@ void Print_matrix(int* matrix, GRID_INFO_TYPE* grid, int n, int q){
 }
 
 
-void Setup_grid(GRID_INFO_TYPE* grid){
-  int old_rank;
-  int dimensions[2];
-  int periods[2];
-  int coordinates[2];
-  int varying_coords[2];
+void Setup_grid(GRID_INFO_TYPE* grid, int n){
+    int old_rank;
+    int dimensions[2];
+    int periods[2];
+    int coordinates[2];
+    int varying_coords[2];
 
-  // Set up Global Grid Information
-  MPI_Comm_size(MPI_COMM_WORLD, &(grid->p));
-  MPI_Comm_rank(MPI_COMM_WORLD, &old_rank);
+    // Set up Global Grid Information
+    MPI_Comm_size(MPI_COMM_WORLD, &(grid->p));
+    MPI_Comm_rank(MPI_COMM_WORLD, &old_rank);
 
-  // Assuming it's a perfect square...
-  grid->q = (int) sqrt((double) grid->p);
-  dimensions[0] = dimensions[1] = grid->p;
+    // Assuming it's a perfect square...
+    int i;
+    for(i = grid->p; sqrt(i) - (int) sqrt(i) > 0; i--); 
+    //grid->q = (int) sqrt((double) grid->p);
+    //dimensions[0] = dimensions[1] = grid->p;
+    if(grid->p > 1 && i == 1){
+        printf("ERROR: Invalid configuration!\n");
+        exit(0);
+    }
+    
+    grid->q = (int) sqrt(i);
+    dimensions[0] = dimensions[1] = i;
 
-  periods[0] = periods[1] = 1;
+    periods[0] = periods[1] = 1;
 
-  // create a cartesian communicator
-  MPI_Cart_create(MPI_COMM_WORLD,2,dimensions,periods,1,&(grid->comm));
+    // create a cartesian communicator
+    MPI_Cart_create(MPI_COMM_WORLD,2,dimensions,periods,0,&(grid->comm));
 
-  // Determines the rank of the calling process
-  MPI_Comm_rank(grid->comm, &(grid->my_rank));
+    // Determines the rank of the calling process
+    MPI_Comm_rank(grid->comm, &(grid->my_rank));
 
-  // Determines process coords in cartesian topology given rank in group
-  MPI_Cart_coords(grid->comm,grid->my_rank,2,coordinates);
-  grid->my_row = coordinates[0];
-  grid->my_col = coordinates[1];
+    // Determines process coords in cartesian topology given rank in group
+    MPI_Cart_coords(grid->comm,grid->my_rank,2,coordinates);
+    grid->my_row = coordinates[0];
+    grid->my_col = coordinates[1];
 
-  // Set up row and column communicators
-  varying_coords[0] = 0;
-  varying_coords[1] = 1;
-  MPI_Cart_sub(grid->comm,varying_coords,&(grid->row_comm));
-  varying_coords[0] = 1;
-  varying_coords[1] = 0;
-  MPI_Cart_sub(grid->comm,varying_coords,&(grid->col_comm));
+    // Set up row and column communicators
+    varying_coords[0] = 0;
+    varying_coords[1] = 1;
+    MPI_Cart_sub(grid->comm,varying_coords,&(grid->row_comm));
+    varying_coords[0] = 1;
+    varying_coords[1] = 0;
+    MPI_Cart_sub(grid->comm,varying_coords,&(grid->col_comm));
 
-  MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Barrier(MPI_COMM_WORLD);
 }
 
 
@@ -201,6 +210,7 @@ void Fox(int n, GRID_INFO_TYPE* grid, int* local_A, int* local_B, int* local_C){
     free(temp_A);
 }
 
+
 void Min_plus_matrix_mul(int* matrix, int n, GRID_INFO_TYPE grid){
     int n_bar = n / grid.q;
     
@@ -228,7 +238,7 @@ void Min_plus_matrix_mul(int* matrix, int n, GRID_INFO_TYPE grid){
 
 void main(int argc, char **argv) {
     
-    int p, rank, n, n_bar;
+    int rank, n;
     GRID_INFO_TYPE grid;
     double start, end;
     int* matrix;
@@ -236,13 +246,14 @@ void main(int argc, char **argv) {
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    Setup_grid(&grid);
 
     if(rank == 0){
         scanf("%d", &n);
         matrix = (int *)malloc(n * n * sizeof(int));
     }
     MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    Setup_grid(&grid, n);
 
     Read_matrix(matrix, &grid, n, grid.q);
 
