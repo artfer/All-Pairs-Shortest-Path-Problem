@@ -138,8 +138,10 @@ void Setup_grid(GRID_INFO_TYPE* grid, int n){
     int varying_coords[2];
 
     // Set up Global Grid Information
-    MPI_Comm_size(MPI_COMM_WORLD, &(grid->p));
+    MPI_Comm_size(MPI_COMM_WORLD, &(grid->p)); 
     MPI_Comm_rank(MPI_COMM_WORLD, &old_rank);
+
+    //print 
 
     // Assuming it's a perfect square...
     grid->q = (int) sqrt((double) grid->p);
