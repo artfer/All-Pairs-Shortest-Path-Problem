@@ -65,9 +65,7 @@ void Setup_grid(GRID_INFO_TYPE* grid, int n){
     MPI_Comm_size(MPI_COMM_WORLD, &(grid->p)); 
     MPI_Comm_rank(MPI_COMM_WORLD, &old_rank);
 
-    //print 
-
-    // Assuming it's a perfect square...
+    // Validate
     if(  n % (int) sqrt(grid->p) != 0){
         if(old_rank == 0){
             printf("ERROR: Invalid configuration!\n");
@@ -163,8 +161,8 @@ void Scatter_matrix(int* matrix, int* local_A, int* local_B, GRID_INFO_TYPE grid
                 tmp = Get_value(matrix, i, j, n);
 
                 if(dest == 0){
-                    Put_value(local_A, i % n_bar,  j % n_bar, n_bar, tmp);
-                    Put_value(local_B, i % n_bar,  j % n_bar, n_bar, (int) tmp);
+                    Put_value(local_A, i%n_bar, j%n_bar, n_bar, tmp);
+                    Put_value(local_B, i%n_bar, j%n_bar, n_bar, (int) tmp);
                 } else
                     MPI_Send(&tmp, 1, MPI_INT, dest, 0, grid.comm);
             }
