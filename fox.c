@@ -215,7 +215,7 @@ void Gather_matrix(int* matrix, int* local_C, GRID_INFO_TYPE grid, int n){
 
 void Min_plus_matrix_mul(int* matrix, int n, GRID_INFO_TYPE grid){
     int n_bar = n / grid.q;
-    
+
     // Allocate space for local matrices
     int* local_A = (int *)malloc(n_bar * n_bar * sizeof(int));
     int* local_B = (int *)malloc(n_bar * n_bar * sizeof(int));
@@ -223,17 +223,16 @@ void Min_plus_matrix_mul(int* matrix, int n, GRID_INFO_TYPE grid){
 
     for(int f = 2; f < n; f+=f){
 
-        // Serial
-        Local_matrix_multiply(matrix, matrix, local_C, n);
-        matrix = local_C;
+        // Sequential
+        //Local_matrix_multiply(matrix, matrix, matrix, n);
 
-        /* MPI
+        // MPI
         Scatter_matrix(matrix, local_A, local_B, grid, n);
 
         Fox(n, &grid, local_A, local_B, local_C);
   
         Gather_matrix(matrix, local_C, grid, n);
-        */
+        
     } 
     free(local_A);
     free(local_B);
@@ -270,9 +269,9 @@ void main(int argc, char **argv) {
 
     double total = end - start;
     if(grid.my_rank == 0)
-        printf("Time %.7f\n",total);
+    //    printf("Time %.7f\n",total);
 
-    //Print_matrix(matrix, &grid, n);
+    Print_matrix(matrix, &grid, n);
 
     free(matrix);
 
