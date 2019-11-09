@@ -68,6 +68,13 @@ void Setup_grid(GRID_INFO_TYPE* grid, int n){
     //print 
 
     // Assuming it's a perfect square...
+    if(  n % (int) sqrt(grid->p) != 0){
+        if(old_rank == 0){
+            printf("ERROR: Invalid configuration!\n");
+        }
+        MPI_Finalize();
+        exit(0);
+    }
     grid->q = (int) sqrt((double) grid->p);
     dimensions[0] = dimensions[1] = grid->q;
     
@@ -216,11 +223,17 @@ void Min_plus_matrix_mul(int* matrix, int n, GRID_INFO_TYPE grid){
 
     for(int f = 2; f < n; f+=f){
 
+        // Serial
+        Local_matrix_multiply(matrix, matrix, local_C, n);
+        matrix = local_C;
+
+        /* MPI
         Scatter_matrix(matrix, local_A, local_B, grid, n);
 
         Fox(n, &grid, local_A, local_B, local_C);
   
         Gather_matrix(matrix, local_C, grid, n);
+        */
     } 
     free(local_A);
     free(local_B);
@@ -259,7 +272,7 @@ void main(int argc, char **argv) {
     if(grid.my_rank == 0)
         printf("Time %.7f\n",total);
 
-    Print_matrix(matrix, &grid, n);
+    //Print_matrix(matrix, &grid, n);
 
     free(matrix);
 
