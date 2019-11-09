@@ -1,6 +1,6 @@
 CC = mpicc
 CFLAGS = -lm
-SRCS = fox.c
+SRCS = src/fox.c
 EXEC = fox
 
 all:

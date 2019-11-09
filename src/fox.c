@@ -107,7 +107,6 @@ void Fox(int n, GRID_INFO_TYPE* grid, int* local_A, int* local_B, int* local_C){
     int bcast_root;
     int n_bar; // order of block submatrix = n/q
     int source,dest;
-    int tag = 43;
     MPI_Status status;
 
     n_bar = n/grid->q;
